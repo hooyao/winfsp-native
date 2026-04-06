@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'examples/**'
+              - '*.slnx'
+              - '*.props'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - '.github/workflows/ci.yml'
+
+  build-and-test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Install WinFsp
+        shell: pwsh
+        run: |
+          choco install winfsp -y --params '/Developer'
+          if (!(Test-Path "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll")) {
+            Write-Error "WinFsp installation failed - DLL not found"
+            exit 1
+          }
+
+      - name: Restore dependencies
+        run: dotnet restore WinFsp.Native.slnx
+
+      - name: Build
+        run: dotnet build WinFsp.Native.slnx -c Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: |
+          dotnet test tests/WinFsp.Native.Tests/WinFsp.Native.Tests.csproj `
+            -c Release --no-build --verbosity normal `
+            --logger "trx;LogFileName=WinFsp.Native.Tests.trx" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Test report
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: Test Results
+          path: TestResults/*.trx
+          reporter: dotnet-trx
+          fail-on-error: true
+          use-actions-summary: 'true'
+
+      - name: Pack (verify)
+        run: dotnet pack src/WinFsp.Native/WinFsp.Native.csproj -c Release --no-build -o ./artifacts
+
+      - name: Upload NuGet artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ./artifacts/*.nupkg

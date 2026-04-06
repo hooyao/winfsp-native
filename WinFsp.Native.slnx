@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WinFsp.Native/WinFsp.Native.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WinFsp.Native.Tests/WinFsp.Native.Tests.csproj" />
+  </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/HelloFs/HelloFs.csproj" />
+  </Folder>
+</Solution>

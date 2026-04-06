@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Authors>Hu Yao</Authors>
+    <Company>hooyao</Company>
+    <Product>WinFsp.Native</Product>
+    <Description>Zero-alloc, AOT-ready WinFsp binding for modern .NET. A high-performance alternative to the official WinFsp.Net package with full Native AOT support, zero managed heap allocations on hot paths, and a modern async-first API.</Description>
+    <Copyright>Copyright (c) 2026 Hu Yao</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/hooyao/winfsp-native</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/hooyao/winfsp-native</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>winfsp;filesystem;fuse;windows;native-aot;zero-alloc;usermode-filesystem;file-system-driver</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+</Project>

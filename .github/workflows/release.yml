@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          Write-Output "VERSION=$version" >> $env:GITHUB_OUTPUT
+          if ($version -match '-') {
+            Write-Output "PRERELEASE=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Output "PRERELEASE=false" >> $env:GITHUB_OUTPUT
+          }
+          Write-Host "Version: $version, Prerelease: $($version -match '-')"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Install WinFsp
+        shell: pwsh
+        run: |
+          choco install winfsp -y --params '/Developer'
+          if (!(Test-Path "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll")) {
+            Write-Error "WinFsp installation failed - DLL not found"
+            exit 1
+          }
+
+      - name: Restore
+        run: dotnet restore WinFsp.Native.slnx
+
+      - name: Build
+        run: dotnet build WinFsp.Native.slnx -c Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: |
+          dotnet test tests/WinFsp.Native.Tests/WinFsp.Native.Tests.csproj `
+            -c Release --no-build --verbosity normal
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Pack
+        run: dotnet pack src/WinFsp.Native/WinFsp.Native.csproj -c Release --no-build "-p:PackageVersion=${{ steps.version.outputs.VERSION }}" -o ./artifacts
+
+      - name: Push to NuGet
+        run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
+          $prerelease = "${{ steps.version.outputs.PRERELEASE }}"
+          $ghArgs = @(
+            "release", "create", "${{ github.ref_name }}",
+            "--title", "WinFsp.Native $version",
+            "--generate-notes"
+          )
+          if ($prerelease -eq "true") {
+            $ghArgs += "--prerelease"
+          }
+          # Attach nupkg
+          $nupkg = Get-ChildItem -Path ./artifacts -Filter *.nupkg | Select-Object -First 1
+          if ($nupkg) {
+            $ghArgs += $nupkg.FullName
+          }
+          gh @ghArgs
