@@ -8,6 +8,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  packages: write
 
 jobs:
   release:
@@ -72,6 +73,12 @@ jobs:
           $nupkg = Get-ChildItem -Path ./artifacts -Filter *.nupkg | Select-Object -First 1
           if (-not $nupkg) { Write-Error "No .nupkg found in ./artifacts"; exit 1 }
           dotnet nuget push $nupkg.FullName --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Push to GitHub Packages
+        shell: pwsh
+        run: |
+          $nupkg = Get-ChildItem -Path ./artifacts -Filter *.nupkg | Select-Object -First 1
+          dotnet nuget push $nupkg.FullName --api-key ${{ secrets.GITHUB_TOKEN }} --source https://nuget.pkg.github.com/hooyao/index.json --skip-duplicate
 
       - name: Create GitHub Release
         env:
