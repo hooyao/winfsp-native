@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -58,6 +60,11 @@ jobs:
 
       - name: Pack
         run: dotnet pack src/WinFsp.Native/WinFsp.Native.csproj -c Release --no-build "-p:PackageVersion=${{ steps.version.outputs.VERSION }}" -o ./artifacts
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ./artifacts/*.nupkg
 
       - name: Push to NuGet
         shell: pwsh
