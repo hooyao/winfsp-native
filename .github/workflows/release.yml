@@ -60,7 +60,11 @@ jobs:
         run: dotnet pack src/WinFsp.Native/WinFsp.Native.csproj -c Release --no-build "-p:PackageVersion=${{ steps.version.outputs.VERSION }}" -o ./artifacts
 
       - name: Push to NuGet
-        run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        shell: pwsh
+        run: |
+          $nupkg = Get-ChildItem -Path ./artifacts -Filter *.nupkg | Select-Object -First 1
+          if (-not $nupkg) { Write-Error "No .nupkg found in ./artifacts"; exit 1 }
+          dotnet nuget push $nupkg.FullName --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Create GitHub Release
         env:
