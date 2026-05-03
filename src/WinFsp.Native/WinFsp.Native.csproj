@@ -10,7 +10,7 @@
         <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
         <RootNamespace>WinFsp.Native</RootNamespace>
         <PackageId>WinFsp.Native</PackageId>
-        <Version>0.1.2-pre.2</Version>
+        <Version>0.1.2-pre.3</Version>
     </PropertyGroup>
 
     <ItemGroup>
