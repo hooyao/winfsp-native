@@ -8,7 +8,8 @@ using Xunit;
 namespace WinFsp.Native.Tests;
 
 [SupportedOSPlatform("windows")]
-public class NotifyTests(SyncFixture fixture) : IClassFixture<SyncFixture>
+[Collection("Sync")]
+public class NotifyTests(SyncFixture fixture)
 {
     private readonly FileSystemHost _host = fixture.Host;
 
