@@ -30,6 +30,7 @@ public abstract class MountFixtureBase : IDisposable
     private readonly FileSystemHost _host;
     public string Root { get; }
     public AsyncMode Mode { get; }
+    public FileSystemHost Host => _host;
 
     protected MountFixtureBase(AsyncMode mode, string shareName)
     {

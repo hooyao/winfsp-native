@@ -112,6 +112,16 @@ internal static partial class FspApi
     [LibraryImport(DllName, EntryPoint = "FspFileSystemNotifyEnd")]
     internal static partial int FspFileSystemNotifyEnd(nint fileSystem);
 
+    [LibraryImport(DllName, EntryPoint = "FspFileSystemNotify")]
+    internal static unsafe partial int FspFileSystemNotify(nint fileSystem, FspFsctlNotifyInfo* notifyInfo, nuint size);
+
+    /// <summary>
+    /// Upper-case a string buffer in place. Required before <see cref="FspFileSystemNotify"/> on
+    /// case-insensitive volumes — the WinFsp driver's cache key is the upper-cased path.
+    /// </summary>
+    [LibraryImport("user32.dll", EntryPoint = "CharUpperBuffW")]
+    internal static unsafe partial uint CharUpperBuffW(char* lpsz, uint cchLength);
+
     // ── Utility ──
 
     [LibraryImport(DllName, EntryPoint = "FspNtStatusFromWin32")]
