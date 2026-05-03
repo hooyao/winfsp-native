@@ -28,6 +28,16 @@ public sealed class FileOperationInfo
     /// <summary>Whether this handle refers to a directory.</summary>
     public bool IsDirectory { get; set; }
 
+    /// <summary>
+    /// The path of the file or directory this handle refers to, as known to the file
+    /// system. Set by the framework on <c>CreateFile</c>/<c>OpenFile</c> and updated on
+    /// successful <c>MoveFile</c>. Useful for callbacks like <c>OverwriteFile</c> and
+    /// <c>SetFileSize</c> whose <see cref="IFileSystem"/> signature does not include a
+    /// path parameter — for example when issuing a <c>FspFileSystemNotify</c> for cache
+    /// invalidation.
+    /// </summary>
+    public string? FileName { get; internal set; }
+
     /// <summary>The process ID of the calling process.</summary>
     public uint ProcessId { get; internal set; }
 

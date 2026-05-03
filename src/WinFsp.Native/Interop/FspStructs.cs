@@ -29,6 +29,25 @@ public unsafe struct FspVolumeInfo
 }
 
 /// <summary>
+/// Header of a file-change notification record (matches FSP_FSCTL_NOTIFY_INFO from
+/// winfsp/fsctl.h, exactly 12 bytes; followed inline by a UTF-16 file name).
+///
+/// Used with <see cref="FspApi.FspFileSystemNotify"/> to invalidate the WinFsp kernel
+/// FileInfo cache after path-mutating user-mode operations.
+///
+/// <code>Size</code> is the total record size in bytes (header + name bytes); <code>Filter</code>
+/// is a bitwise OR of <c>FILE_NOTIFY_CHANGE_*</c> values; <code>Action</code> is one of
+/// <c>FILE_ACTION_*</c>. See <see cref="FileNotify"/> for constants.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 2, Size = 12)]
+public struct FspFsctlNotifyInfo
+{
+    public ushort Size;
+    public uint Filter;
+    public uint Action;
+}
+
+/// <summary>
 /// Volume parameters for FspFileSystemCreate. Matches FSP_FSCTL_VOLUME_PARAMS (504 bytes).
 /// Layout from winfsp/fsctl.h lines 192-266.
 ///

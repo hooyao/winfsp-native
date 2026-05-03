@@ -76,7 +76,7 @@ The workflow builds, tests, packs, pushes to nuget.org (via `NUGET_API_KEY` secr
 
 | Namespace | Contains | When to use |
 |---|---|---|
-| `WinFsp.Native` | `IFileSystem`, `FileSystemHost`, `WinFspFileSystem`, `FileOperationInfo`, result types (`FsResult`, `CreateResult`, `ReadResult`, `WriteResult`, `ReadDirectoryResult`), `NtStatus`, `CleanupFlags`, `CreateOptions`, `FspFileInfo`, `FspDirInfo`, `FspStreamInfo`, `PinnedBufferPool` (internal) | `using WinFsp.Native;` — everything for IFileSystem implementors |
+| `WinFsp.Native` | `IFileSystem`, `FileSystemHost`, `WinFspFileSystem`, `FileOperationInfo`, result types (`FsResult`, `CreateResult`, `ReadResult`, `WriteResult`, `ReadDirectoryResult`), `NtStatus`, `CleanupFlags`, `CreateOptions`, `FileNotify`, `FspFileInfo`, `FspDirInfo`, `FspStreamInfo`, `PinnedBufferPool` (internal) | `using WinFsp.Native;` — everything for IFileSystem implementors |
 | `WinFsp.Native.Interop` | `FspApi` (internal), `FspFileSystemInterface`, `FspVolumeParams`, `FspVolumeInfo`, `FspFullContext`, `FspOperationContext`, `FspTransactReq`, `FspTransactRsp`, `FspTransactKind` | `using WinFsp.Native.Interop;` — only for low-level WinFspFileSystem users |
 
 Consumer-facing types (`FspFileInfo`, `FspDirInfo`, `NtStatus`, `CleanupFlags`, `CreateOptions`) were deliberately promoted from Interop to the root namespace because they appear in `IFileSystem` method signatures.
@@ -97,6 +97,15 @@ All FS callback methods (`OnRead`, `OnWrite`, `OnGetFileInfo`, etc.) must not al
 
 ### STATUS_PENDING async
 Must build a fresh stack-allocated `FspTransactRsp` with `Size`/`Kind`/`Hint` fields. Do NOT reuse `OperationContext->Response` — it may be invalidated after returning `STATUS_PENDING`. Save `Request->Hint` before returning, echo it back in the response. This follows the WinFsp official MEMFS `MEMFS_SLOWIO` pattern.
+
+### Cache-invalidation notifications
+
+`FileSystemHost.Notify(filter, action, path)` wraps `FspFileSystemNotify` for invalidating the WinFsp kernel `FileInfo` cache after path-mutating user-mode operations. Required when `FileInfoTimeout > 0`, otherwise the kernel can serve stale `OpenFile` / `ReadFile` results from cache without consulting user-mode.
+
+- **Single-shot, no `Begin/End` framing**: the framing API exists for atomically batching many notifications relative to concurrent renames. Adapters typically emit ≤ 2 notifications per mutation (rename = `RenamedOldName` + `RenamedNewName`) and do not need atomic multi-event ordering. The official `fuse.c` reference implementation in winfsp uses single-shot `Notify` for the same reason.
+- **Case-insensitive normalization is the binding's job**: the WinFsp driver upper-cases internally for case-insensitive volumes and the cache key is the upper-cased form. `Notify` upper-cases the path in place inside its stack buffer when `CaseSensitiveSearch == false`. Callers always pass the user-supplied case unchanged.
+- **Allocation-free hot path**: paths up to ~2030 chars are stack-allocated; longer paths fall back to `ArrayPool<byte>`.
+- **Returns NTSTATUS**: callers (typically adapter mutators) decide error handling. The IRP that triggered the notification MUST NOT be failed because the notification failed — the user-mode mutation has already taken effect.
 
 ## WinFsp Pitfalls (hard-won knowledge)
 

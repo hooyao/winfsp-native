@@ -13,6 +13,7 @@ public static class NtStatus
     public const int NotImplemented = unchecked((int)0xC0000002);
     public const int InvalidDeviceRequest = unchecked((int)0xC0000010);
     public const int EndOfFile = unchecked((int)0xC0000011);
+    public const int InvalidParameter = unchecked((int)0xC000000D);
     public const int MoreProcessingRequired = unchecked((int)0xC0000016);
     public const int AccessDenied = unchecked((int)0xC0000022);
     public const int BufferTooSmall = unchecked((int)0xC0000023);

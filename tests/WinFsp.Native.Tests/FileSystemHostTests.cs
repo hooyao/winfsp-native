@@ -30,6 +30,7 @@ public abstract class MountFixtureBase : IDisposable
     private readonly FileSystemHost _host;
     public string Root { get; }
     public AsyncMode Mode { get; }
+    public FileSystemHost Host => _host;
 
     protected MountFixtureBase(AsyncMode mode, string shareName)
     {
@@ -194,13 +195,30 @@ public abstract class FileSystemHostTestsBase<TFixture>(TFixture fixture, ITestO
 
 // ═══════════════════════════════════════════
 //  Concrete test classes — one per mode, each mounts once
+//
+//  Collections share the fixture across multiple test classes (e.g. NotifyTests
+//  in another file also uses SyncFixture). Without a collection, xUnit creates
+//  one fixture instance per class which produces UNC-prefix collisions when
+//  two SyncFixture instances try to mount the same prefix concurrently.
 // ═══════════════════════════════════════════
 
+[CollectionDefinition("Sync")]
+public class SyncCollection : ICollectionFixture<SyncFixture>;
+
+[CollectionDefinition("SyncCompleted")]
+public class SyncCompletedCollection : ICollectionFixture<SyncCompletedFixture>;
+
+[CollectionDefinition("TrueAsync")]
+public class TrueAsyncCollection : ICollectionFixture<TrueAsyncFixture>;
+
+[Collection("Sync")]
 public class SyncTests(SyncFixture fixture, ITestOutputHelper output)
-    : FileSystemHostTestsBase<SyncFixture>(fixture, output), IClassFixture<SyncFixture>;
+    : FileSystemHostTestsBase<SyncFixture>(fixture, output);
 
+[Collection("SyncCompleted")]
 public class SyncCompletedTests(SyncCompletedFixture fixture, ITestOutputHelper output)
-    : FileSystemHostTestsBase<SyncCompletedFixture>(fixture, output), IClassFixture<SyncCompletedFixture>;
+    : FileSystemHostTestsBase<SyncCompletedFixture>(fixture, output);
 
+[Collection("TrueAsync")]
 public class TrueAsyncTests(TrueAsyncFixture fixture, ITestOutputHelper output)
-    : FileSystemHostTestsBase<TrueAsyncFixture>(fixture, output), IClassFixture<TrueAsyncFixture>;
+    : FileSystemHostTestsBase<TrueAsyncFixture>(fixture, output);

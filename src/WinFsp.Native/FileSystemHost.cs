@@ -100,6 +100,74 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
     public IFileSystem FileSystem => _fs;
 
     // ═══════════════════════════════════════════
+    //  Cache invalidation (FspFileSystemNotify)
+    // ═══════════════════════════════════════════
+
+    /// <summary>
+    /// Invalidate the WinFsp kernel <c>FileInfo</c> cache for a single path.
+    /// Call this from <see cref="IFileSystem"/> callbacks that change the existence,
+    /// name, size, or attributes of a path so subsequent opens/reads observe the
+    /// post-mutation state — even when <see cref="FileInfoTimeout"/> is large.
+    ///
+    /// <para>Always invoke <em>after</em> the user-mode mutation has committed and
+    /// outside any locks the kernel might re-enter (the call is a synchronous IOCTL).</para>
+    ///
+    /// <para>For case-insensitive volumes the path is upper-cased in place inside an
+    /// internal stack buffer before the IOCTL — callers pass the user-supplied case.</para>
+    ///
+    /// <para>Allocation-free for paths up to ~2030 characters (well above MAX_PATH).
+    /// Falls back to <see cref="ArrayPool{T}"/> for longer paths.</para>
+    /// </summary>
+    /// <param name="filter">Bitwise OR of <see cref="FileNotify"/> <c>Change*</c> values.</param>
+    /// <param name="action">One of <see cref="FileNotify"/> <c>Action*</c> values.</param>
+    /// <param name="fileName">Path relative to the mount root, backslash-separated, e.g. <c>\dir\file</c>.</param>
+    /// <returns>NTSTATUS from <c>FspFileSystemNotify</c>. Caller decides how to handle non-success;
+    /// the originating IRP MUST NOT be failed because of a notification error.</returns>
+    public int Notify(uint filter, uint action, ReadOnlySpan<char> fileName)
+    {
+        if (_rawFs == null) return NtStatus.InvalidDeviceRequest;
+
+        int nameByteCount = fileName.Length * sizeof(char);
+        int totalSize = sizeof(FspFsctlNotifyInfo) + nameByteCount;
+        if (totalSize > ushort.MaxValue) return NtStatus.InvalidParameter;
+
+        const int StackThreshold = 4096;
+        byte[]? rented = null;
+        Span<byte> buffer = totalSize <= StackThreshold
+            ? stackalloc byte[StackThreshold].Slice(0, totalSize)
+            : (rented = ArrayPool<byte>.Shared.Rent(totalSize)).AsSpan(0, totalSize);
+
+        try
+        {
+            fixed (byte* p = buffer)
+            {
+                var info = (FspFsctlNotifyInfo*)p;
+                info->Size = (ushort)totalSize;
+                info->Filter = filter;
+                info->Action = action;
+
+                char* nameBuf = (char*)(p + sizeof(FspFsctlNotifyInfo));
+                fileName.CopyTo(new Span<char>(nameBuf, fileName.Length));
+
+                if (!CaseSensitiveSearch && fileName.Length > 0)
+                    FspApi.CharUpperBuffW(nameBuf, (uint)fileName.Length);
+
+                return FspApi.FspFileSystemNotify(_rawFs.Handle, info, (nuint)totalSize);
+            }
+        }
+        finally
+        {
+            if (rented != null) ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>
+    /// String overload of <see cref="Notify(uint, uint, ReadOnlySpan{char})"/>.
+    /// </summary>
+    public int Notify(uint filter, uint action, string fileName)
+        => Notify(filter, action, fileName.AsSpan());
+
+    // ═══════════════════════════════════════════
     //  IDisposable
     // ═══════════════════════════════════════════
 
@@ -136,7 +204,12 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
     private sealed class HandleState
     {
         public readonly FileOperationInfo Info = new();
-        public string? FileName;
+        private string? _fileName;
+        public string? FileName
+        {
+            get => _fileName;
+            set { _fileName = value; Info.FileName = value; }
+        }
     }
 
     // ═══════════════════════════════════════════
