@@ -5,14 +5,24 @@ using System.Runtime.Versioning;
 namespace WinFsp.Native.Interop;
 
 /// <summary>
-/// P/Invoke declarations for winfsp-x64.dll public API functions.
+/// P/Invoke declarations for the WinFsp native DLL public API functions.
 /// All functions use __cdecl calling convention.
-/// DLL is resolved via NativeLibrary with registry fallback.
+/// <para>
+/// The actual DLL filename depends on process architecture:
+/// <c>winfsp-x64.dll</c> on X64, <c>winfsp-a64.dll</c> on ARM64,
+/// <c>winfsp-x86.dll</c> on X86. The WinFsp 2.x MSI installs all three
+/// regardless of OS architecture (see WinFsp-on-ARM64.asciidoc). Selection
+/// happens at first P/Invoke via <see cref="ResolveFspDll"/>; standard
+/// search paths are tried first, then the WinFsp install directory from
+/// HKLM\SOFTWARE\WOW6432Node\WinFsp\InstallDir.
+/// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static partial class FspApi
 {
-    private const string DllName = "winfsp-x64";
+    // Logical alias intercepted by ResolveFspDll. The literal string never
+    // hits the OS loader — the resolver translates it to the per-arch DLL.
+    private const string DllName = "winfsp";
 
     public const string FspFsctlDiskDeviceName = @"\Device\WinFsp.Disk";
     public const string FspFsctlNetDeviceName = @"\Device\WinFsp.Net";
@@ -155,23 +165,42 @@ internal static partial class FspApi
         NativeLibrary.SetDllImportResolver(typeof(FspApi).Assembly, ResolveFspDll);
     }
 
+    /// <summary>
+    /// Returns the WinFsp native DLL filename for the current process architecture.
+    /// WinFsp's MSI installs all three (a64, x64, x86) regardless of OS architecture,
+    /// so process arch — not OS arch — is what we match.
+    /// </summary>
+    private static string GetWinFspDllFileName() => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64   => "winfsp-x64.dll",
+        Architecture.Arm64 => "winfsp-a64.dll",
+        Architecture.X86   => "winfsp-x86.dll",
+        var arch => throw new PlatformNotSupportedException(
+            $"WinFsp does not ship a native DLL for process architecture {arch}."),
+    };
+
     private static nint ResolveFspDll(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (libraryName != DllName)
             return 0;
 
-        // Try standard search paths first
-        if (NativeLibrary.TryLoad(libraryName, assembly, searchPath, out nint handle))
+        string dllFileName = GetWinFspDllFileName();
+
+        // Try standard search paths first (PATH, app dir, etc.)
+        if (NativeLibrary.TryLoad(dllFileName, assembly, searchPath, out nint handle))
             return handle;
 
-        // Fallback: read WinFsp installation directory from registry
+        // Fallback: read WinFsp installation directory from registry.
+        // WinFsp's MSI writes InstallDir to the 32-bit registry view
+        // (WOW6432Node\WinFsp), and this path is reachable from any-bitness
+        // process on x64 and ARM64 Windows alike.
         string? installDir = Microsoft.Win32.Registry.GetValue(
             @"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\WinFsp",
             "InstallDir", null) as string;
 
         if (installDir != null)
         {
-            string dllPath = Path.Combine(installDir, "bin", "winfsp-x64.dll");
+            string dllPath = Path.Combine(installDir, "bin", dllFileName);
             if (NativeLibrary.TryLoad(dllPath, out handle))
                 return handle;
         }

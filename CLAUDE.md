@@ -66,7 +66,7 @@ The workflow builds, tests, packs, pushes to nuget.org (via `NUGET_API_KEY` secr
     ┌───────────▼────────────────────────────────────────────┐
     │  Interop: FspApi + FspStructs + FspFileSystemInterface │
     └───────────┬────────────────────────────────────────────┘
-                │ winfsp-x64.dll (runtime, GPLv3)
+                │ winfsp-{x64,a64,x86}.dll (runtime, GPLv3 — arch-selected)
     ┌───────────▼───────────────┐
     │  WinFSP kernel driver     │
     └───────────────────────────┘
