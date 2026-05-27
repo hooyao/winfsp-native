@@ -59,7 +59,7 @@ Get-Service WinFsp.Launcher
     ┌───────────▼───────────────────────────────────────────┐
     │  Interop: FspApi + FspStructs + NtStatus              │
     └───────────┬───────────────────────────────────────────┘
-                │ winfsp-x64.dll (runtime, GPLv3)
+                │ winfsp-{x64,a64,x86}.dll (runtime, GPLv3 — arch-selected)
     ┌───────────▼───────────────┐
     │  WinFSP kernel driver     │
     └───────────────────────────┘
