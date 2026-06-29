@@ -360,14 +360,16 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
         try
         {
             string name = new(fileName);
-            byte[]? sdBytes = pSdSize != null ? [] : null;
-            int r = self._fs.GetFileSecurityByName(name, out uint attr, ref sdBytes);
-            if (r >= 0 || r == NtStatus.Reparse)
+            // WinFsp calls this synchronously (no STATUS_PENDING path); block only if the
+            // implementation's task did not complete synchronously.
+            var task = self._fs.GetFileSecurityByName(name, pSdSize != null, CancellationToken.None);
+            var r = task.IsCompletedSuccessfully ? task.Result : task.AsTask().GetAwaiter().GetResult();
+            if (r.Status >= 0 || r.Status == NtStatus.Reparse)
             {
-                if (pAttr != null) *pAttr = attr;
-                if (pSdSize != null) CopySecurityDescriptor(sdBytes, sd, pSdSize);
+                if (pAttr != null) *pAttr = r.FileAttributes;
+                if (pSdSize != null) CopySecurityDescriptor(r.SecurityDescriptor, sd, pSdSize);
             }
-            return r;
+            return r.Status;
         }
         catch (Exception ex) { return self.HandleException(ex); }
     }
@@ -857,7 +859,14 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
     static int OnGetDirInfoByName(nint fs, FspFullContext* ctx, char* fn, FspDirInfo* pDi)
     {
         var self = Self(fs);
-        try { var hs = H(ctx); int r = self._fs.GetDirInfoByName(hs.FileName!, new string(fn), out var di, hs.Info); if (r >= 0) *pDi = di; return r; }
+        try
+        {
+            var hs = H(ctx);
+            var task = self._fs.GetDirInfoByName(hs.FileName!, new string(fn), hs.Info, hs.Info.CancellationToken);
+            var r = task.IsCompletedSuccessfully ? task.Result : task.AsTask().GetAwaiter().GetResult();
+            if (r.Status >= 0) *pDi = r.DirInfo;
+            return r.Status;
+        }
         catch (Exception ex) { return self.HandleException(ex); }
     }
 

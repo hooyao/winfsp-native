@@ -27,15 +27,26 @@ internal sealed class TestMemFs : IFileSystem
 {
     private readonly AsyncMode _mode;
     private readonly string _prefix;
+    private readonly bool _passQueryDirectoryFileName;
     private readonly object _lock = new();
     private readonly Dictionary<string, MemNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private long _totalBytes;
 
-    public TestMemFs(AsyncMode mode, string prefix, long totalBytes = 64 * 1024 * 1024)
+    /// <summary>Number of times GetFileSecurityByName was invoked (for dispatch-path assertions).</summary>
+    public int GetFileSecurityByNameCalls;
+
+    /// <summary>Number of times GetDirInfoByName was invoked (for dispatch-path assertions).</summary>
+    public int GetDirInfoByNameCalls;
+
+    public TestMemFs(AsyncMode mode, string prefix, long totalBytes = 64 * 1024 * 1024,
+        bool passQueryDirectoryFileName = false)
     {
         _mode = mode;
         _prefix = prefix;
         _totalBytes = totalBytes;
+        // Opt in to single-name query routing so WinFsp dispatches exact-name lookups
+        // through GetDirInfoByName instead of enumerating via ReadDirectory.
+        _passQueryDirectoryFileName = passQueryDirectoryFileName;
         // Root directory
         _nodes[@"\"] = new MemNode { IsDirectory = true, Name = @"\" };
     }
@@ -64,6 +75,7 @@ internal sealed class TestMemFs : IFileSystem
         host.UnicodeOnDisk = true;
         host.PersistentAcls = true;
         host.PostCleanupWhenModifiedOnly = true;
+        host.PassQueryDirectoryFileName = _passQueryDirectoryFileName;
         host.FileSystemName = "NTFS";
         host.Prefix = _prefix; // UNC mount — no drive letter needed
         return NtStatus.Success;
@@ -79,19 +91,38 @@ internal sealed class TestMemFs : IFileSystem
         return NtStatus.Success;
     }
 
-    public int GetFileSecurityByName(string fileName, out uint fileAttributes, ref byte[]? securityDescriptor)
+    public ValueTask<SecurityByNameResult> GetFileSecurityByName(string fileName, bool getSecurityDescriptor, CancellationToken ct)
     {
+        Interlocked.Increment(ref GetFileSecurityByNameCalls);
         lock (_lock)
         {
             if (_nodes.TryGetValue(fileName, out var node))
             {
-                fileAttributes = node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u);
-                securityDescriptor = null;
-                return NtStatus.Success;
+                uint attr = node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u);
+                return new ValueTask<SecurityByNameResult>(SecurityByNameResult.Success(attr));
             }
         }
-        fileAttributes = 0;
-        return NtStatus.ObjectNameNotFound;
+        return new ValueTask<SecurityByNameResult>(SecurityByNameResult.Error(NtStatus.ObjectNameNotFound));
+    }
+
+    /// <summary>
+    /// Resolve a single child entry by name. Implemented (the default returns
+    /// InvalidDeviceRequest) so the OnGetDirInfoByName dispatch path is exercised.
+    /// </summary>
+    public ValueTask<DirInfoByNameResult> GetDirInfoByName(string dirName, string entryName, FileOperationInfo info, CancellationToken ct)
+    {
+        Interlocked.Increment(ref GetDirInfoByNameCalls);
+        string childPath = dirName.TrimEnd('\\') + @"\" + entryName;
+        lock (_lock)
+        {
+            if (_nodes.TryGetValue(childPath, out var node))
+            {
+                var di = new FspDirInfo { FileInfo = MakeFileInfo(node) };
+                di.SetFileName(node.Name);
+                return new ValueTask<DirInfoByNameResult>(DirInfoByNameResult.Success(di));
+            }
+        }
+        return new ValueTask<DirInfoByNameResult>(DirInfoByNameResult.Error(NtStatus.ObjectNameNotFound));
     }
 
     // ── Create / Open ──

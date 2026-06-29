@@ -53,3 +53,46 @@ public readonly struct ReadDirectoryResult
 
     public static ReadDirectoryResult Error(int status) => new() { Status = status };
 }
+
+/// <summary>
+/// Result of <see cref="IFileSystem.GetFileSecurityByName"/> — NTSTATUS plus the file
+/// attributes and an optional security descriptor.
+/// </summary>
+public readonly struct SecurityByNameResult
+{
+    public int Status { get; init; }
+    public uint FileAttributes { get; init; }
+
+    /// <summary>
+    /// Self-relative security descriptor bytes, or <c>null</c> to make WinFsp skip access
+    /// checks (the common case for read-only file systems).
+    /// </summary>
+    public byte[]? SecurityDescriptor { get; init; }
+
+    public static SecurityByNameResult Success(uint fileAttributes, byte[]? securityDescriptor = null) => new()
+    {
+        Status = NtStatus.Success,
+        FileAttributes = fileAttributes,
+        SecurityDescriptor = securityDescriptor,
+    };
+
+    public static SecurityByNameResult Error(int status) => new() { Status = status };
+}
+
+/// <summary>
+/// Result of <see cref="IFileSystem.GetDirInfoByName"/> — NTSTATUS plus the matched
+/// directory entry.
+/// </summary>
+public readonly struct DirInfoByNameResult
+{
+    public int Status { get; init; }
+    public FspDirInfo DirInfo { get; init; }
+
+    public static DirInfoByNameResult Success(FspDirInfo dirInfo) => new()
+    {
+        Status = NtStatus.Success,
+        DirInfo = dirInfo,
+    };
+
+    public static DirInfoByNameResult Error(int status) => new() { Status = status };
+}
