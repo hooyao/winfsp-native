@@ -109,12 +109,14 @@ public class NameLookupContractTests
     [Fact]
     public async Task GetFileSecurityByName_AsyncImplementation_RoundTripsThroughValueTask()
     {
+        // An async (await Task.Yield) implementation round-trips correctly through the
+        // ValueTask<SecurityByNameResult> signature. (We don't assert IsCompletedSuccessfully:
+        // after the async method returns, the yielded continuation may already have completed on
+        // another thread, so the completed-state is a race — the result is what matters.)
         IFileSystem fs = new AsyncFs();
 
-        ValueTask<SecurityByNameResult> task = fs.GetFileSecurityByName(@"\f", false, default);
+        SecurityByNameResult r = await fs.GetFileSecurityByName(@"\f", false, default);
 
-        task.IsCompletedSuccessfully.Should().BeFalse("Task.Yield() forces the asynchronous (dispatcher-await) path");
-        SecurityByNameResult r = await task;
         r.Status.Should().Be(NtStatus.Success);
         r.FileAttributes.Should().Be(0x80u);
     }
@@ -124,10 +126,8 @@ public class NameLookupContractTests
     {
         IFileSystem fs = new AsyncFs();
 
-        ValueTask<DirInfoByNameResult> task = fs.GetDirInfoByName(@"\", "f.txt", new FileOperationInfo(), default);
+        DirInfoByNameResult r = await fs.GetDirInfoByName(@"\", "f.txt", new FileOperationInfo(), default);
 
-        task.IsCompletedSuccessfully.Should().BeFalse();
-        DirInfoByNameResult r = await task;
         r.Status.Should().Be(NtStatus.Success);
         r.DirInfo.FileInfo.FileSize.Should().Be(7UL);
     }
