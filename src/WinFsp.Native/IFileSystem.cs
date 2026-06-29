@@ -112,10 +112,19 @@ public interface IFileSystem
     // ═══════════════════════════════════════════
 
     /// <summary>
-    /// Check if a path exists and return its attributes. MUST implement.
-    /// Called before every Create/Open for access checks.
+    /// Check if a path exists and return its attributes (and optionally its security
+    /// descriptor). MUST implement. Called before every Create/Open for access checks.
+    /// <para>Return an already-completed <see cref="ValueTask{T}"/> for the common synchronous
+    /// case (zero-allocation fast path) — the dispatcher only blocks the calling thread when the
+    /// returned task has not yet completed. WinFsp invokes this callback synchronously and has no
+    /// deferred-completion (STATUS_PENDING) path for it, so a non-completed task is awaited inline.</para>
     /// </summary>
-    int GetFileSecurityByName(string fileName, out uint fileAttributes, ref byte[]? securityDescriptor);
+    /// <param name="getSecurityDescriptor">
+    /// <c>true</c> when WinFsp requested the security descriptor. Return
+    /// <see cref="SecurityByNameResult.SecurityDescriptor"/> = <c>null</c> to make WinFsp skip access checks.
+    /// </param>
+    ValueTask<SecurityByNameResult> GetFileSecurityByName(
+        string fileName, bool getSecurityDescriptor, CancellationToken ct);
 
     // ═══════════════════════════════════════════
     //  Create / Open / Overwrite
@@ -258,8 +267,17 @@ public interface IFileSystem
         ReadOnlySpan<byte> input, Span<byte> output, out uint bytesTransferred, FileOperationInfo info)
     { bytesTransferred = 0; return NtStatus.InvalidDeviceRequest; }
 
-    int GetDirInfoByName(string dirName, string entryName, out FspDirInfo dirInfo, FileOperationInfo info)
-    { dirInfo = default; return NtStatus.InvalidDeviceRequest; }
+    /// <summary>
+    /// Resolve a single directory entry by name (used by WinFsp during per-component path
+    /// processing). Optional — the default returns InvalidDeviceRequest, causing WinFsp to fall
+    /// back to Open/GetFileInformation.
+    /// <para>Return an already-completed <see cref="ValueTask{T}"/> for the synchronous case;
+    /// like <see cref="GetFileSecurityByName"/>, WinFsp calls this synchronously with no
+    /// STATUS_PENDING path, so a non-completed task is awaited inline on the dispatcher thread.</para>
+    /// </summary>
+    ValueTask<DirInfoByNameResult> GetDirInfoByName(
+        string dirName, string entryName, FileOperationInfo info, CancellationToken ct)
+        => new(DirInfoByNameResult.Error(NtStatus.InvalidDeviceRequest));
 
     // ═══════════════════════════════════════════
     //  Exception handler

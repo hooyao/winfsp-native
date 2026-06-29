@@ -79,19 +79,17 @@ internal sealed class TestMemFs : IFileSystem
         return NtStatus.Success;
     }
 
-    public int GetFileSecurityByName(string fileName, out uint fileAttributes, ref byte[]? securityDescriptor)
+    public ValueTask<SecurityByNameResult> GetFileSecurityByName(string fileName, bool getSecurityDescriptor, CancellationToken ct)
     {
         lock (_lock)
         {
             if (_nodes.TryGetValue(fileName, out var node))
             {
-                fileAttributes = node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u);
-                securityDescriptor = null;
-                return NtStatus.Success;
+                uint attr = node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u);
+                return new ValueTask<SecurityByNameResult>(SecurityByNameResult.Success(attr));
             }
         }
-        fileAttributes = 0;
-        return NtStatus.ObjectNameNotFound;
+        return new ValueTask<SecurityByNameResult>(SecurityByNameResult.Error(NtStatus.ObjectNameNotFound));
     }
 
     // ── Create / Open ──
