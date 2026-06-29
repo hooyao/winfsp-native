@@ -31,6 +31,12 @@ internal sealed class TestMemFs : IFileSystem
     private readonly Dictionary<string, MemNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private long _totalBytes;
 
+    /// <summary>Number of times GetFileSecurityByName was invoked (for dispatch-path assertions).</summary>
+    public int GetFileSecurityByNameCalls;
+
+    /// <summary>Number of times GetDirInfoByName was invoked (for dispatch-path assertions).</summary>
+    public int GetDirInfoByNameCalls;
+
     public TestMemFs(AsyncMode mode, string prefix, long totalBytes = 64 * 1024 * 1024)
     {
         _mode = mode;
@@ -81,6 +87,7 @@ internal sealed class TestMemFs : IFileSystem
 
     public ValueTask<SecurityByNameResult> GetFileSecurityByName(string fileName, bool getSecurityDescriptor, CancellationToken ct)
     {
+        Interlocked.Increment(ref GetFileSecurityByNameCalls);
         lock (_lock)
         {
             if (_nodes.TryGetValue(fileName, out var node))
@@ -90,6 +97,26 @@ internal sealed class TestMemFs : IFileSystem
             }
         }
         return new ValueTask<SecurityByNameResult>(SecurityByNameResult.Error(NtStatus.ObjectNameNotFound));
+    }
+
+    /// <summary>
+    /// Resolve a single child entry by name. Implemented (the default returns
+    /// InvalidDeviceRequest) so the OnGetDirInfoByName dispatch path is exercised.
+    /// </summary>
+    public ValueTask<DirInfoByNameResult> GetDirInfoByName(string dirName, string entryName, FileOperationInfo info, CancellationToken ct)
+    {
+        Interlocked.Increment(ref GetDirInfoByNameCalls);
+        string childPath = dirName.TrimEnd('\\') + @"\" + entryName;
+        lock (_lock)
+        {
+            if (_nodes.TryGetValue(childPath, out var node))
+            {
+                var di = new FspDirInfo { FileInfo = MakeFileInfo(node) };
+                di.SetFileName(node.Name);
+                return new ValueTask<DirInfoByNameResult>(DirInfoByNameResult.Success(di));
+            }
+        }
+        return new ValueTask<DirInfoByNameResult>(DirInfoByNameResult.Error(NtStatus.ObjectNameNotFound));
     }
 
     // ── Create / Open ──
