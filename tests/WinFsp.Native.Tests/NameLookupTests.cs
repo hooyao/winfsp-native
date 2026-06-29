@@ -185,58 +185,56 @@ public class TestMemFsNameLookupTests
 {
     private static TestMemFs NewFs() => new(AsyncMode.SyncCompleted, $@"\nlu-{Guid.NewGuid():N}");
 
-    private static void Create(TestMemFs fs, string path, uint createOptions = 0, uint attrs = 0)
+    private static async Task Create(TestMemFs fs, string path, uint createOptions = 0, uint attrs = 0)
     {
-        var info = new FileOperationInfo();
-        ValueTask<CreateResult> t = fs.CreateFile(path, createOptions, 0, attrs, null, 0, info, default);
-        t.IsCompletedSuccessfully.Should().BeTrue();
-        t.Result.Status.Should().Be(NtStatus.Success);
+        CreateResult r = await fs.CreateFile(path, createOptions, 0, attrs, null, 0, new FileOperationInfo(), default);
+        r.Status.Should().Be(NtStatus.Success);
     }
 
     [Fact]
-    public void GetFileSecurityByName_ExistingFile_ReturnsAttributesSynchronously()
+    public async Task GetFileSecurityByName_ExistingFile_ReturnsAttributesSynchronously()
     {
         var fs = NewFs();
-        Create(fs, @"\f.txt", attrs: 0x80u);
+        await Create(fs, @"\f.txt", attrs: 0x80u);
 
         ValueTask<SecurityByNameResult> task = fs.GetFileSecurityByName(@"\f.txt", false, default);
 
-        task.IsCompletedSuccessfully.Should().BeTrue();
-        SecurityByNameResult r = task.Result;
+        task.IsCompletedSuccessfully.Should().BeTrue("a synchronous impl returns an already-completed ValueTask");
+        SecurityByNameResult r = await task;
         r.Status.Should().Be(NtStatus.Success);
         (r.FileAttributes & 0x80u).Should().Be(0x80u);
         fs.GetFileSecurityByNameCalls.Should().Be(1);
     }
 
     [Fact]
-    public void GetFileSecurityByName_Directory_ReportsDirectoryAttribute()
+    public async Task GetFileSecurityByName_Directory_ReportsDirectoryAttribute()
     {
         var fs = NewFs();
-        Create(fs, @"\d", createOptions: 1); // FILE_DIRECTORY_FILE
+        await Create(fs, @"\d", createOptions: 1); // FILE_DIRECTORY_FILE
 
-        SecurityByNameResult r = fs.GetFileSecurityByName(@"\d", false, default).Result;
+        SecurityByNameResult r = await fs.GetFileSecurityByName(@"\d", false, default);
 
         r.Status.Should().Be(NtStatus.Success);
         (r.FileAttributes & 0x10u).Should().Be(0x10u); // FILE_ATTRIBUTE_DIRECTORY
     }
 
     [Fact]
-    public void GetFileSecurityByName_Missing_ReturnsObjectNameNotFound()
+    public async Task GetFileSecurityByName_Missing_ReturnsObjectNameNotFound()
     {
         var fs = NewFs();
 
-        SecurityByNameResult r = fs.GetFileSecurityByName(@"\nope", false, default).Result;
+        SecurityByNameResult r = await fs.GetFileSecurityByName(@"\nope", false, default);
 
         r.Status.Should().Be(NtStatus.ObjectNameNotFound);
     }
 
     [Fact]
-    public void GetDirInfoByName_ExistingChild_ReturnsEntry()
+    public async Task GetDirInfoByName_ExistingChild_ReturnsEntry()
     {
         var fs = NewFs();
-        Create(fs, @"\readme.txt", attrs: 0x80u);
+        await Create(fs, @"\readme.txt", attrs: 0x80u);
 
-        DirInfoByNameResult r = fs.GetDirInfoByName(@"\", "readme.txt", new FileOperationInfo(), default).Result;
+        DirInfoByNameResult r = await fs.GetDirInfoByName(@"\", "readme.txt", new FileOperationInfo(), default);
 
         r.Status.Should().Be(NtStatus.Success);
         (r.DirInfo.FileInfo.FileAttributes & 0x80u).Should().Be(0x80u);
@@ -244,11 +242,11 @@ public class TestMemFsNameLookupTests
     }
 
     [Fact]
-    public void GetDirInfoByName_MissingChild_ReturnsObjectNameNotFound()
+    public async Task GetDirInfoByName_MissingChild_ReturnsObjectNameNotFound()
     {
         var fs = NewFs();
 
-        DirInfoByNameResult r = fs.GetDirInfoByName(@"\", "nope.txt", new FileOperationInfo(), default).Result;
+        DirInfoByNameResult r = await fs.GetDirInfoByName(@"\", "nope.txt", new FileOperationInfo(), default);
 
         r.Status.Should().Be(NtStatus.ObjectNameNotFound);
     }
@@ -269,7 +267,8 @@ public sealed class NameLookupMountFixture : IDisposable
     public NameLookupMountFixture()
     {
         var prefix = $@"\winfsp-tests\namelookup-{Environment.ProcessId}";
-        Fs = new TestMemFs(AsyncMode.SyncCompleted, prefix);
+        // Opt in to single-name query routing so exact-name lookups dispatch through GetDirInfoByName.
+        Fs = new TestMemFs(AsyncMode.SyncCompleted, prefix, passQueryDirectoryFileName: true);
         _host = new FileSystemHost(Fs);
         int result = _host.Mount(null);
         if (result < 0)

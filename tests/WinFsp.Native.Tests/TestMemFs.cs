@@ -27,6 +27,7 @@ internal sealed class TestMemFs : IFileSystem
 {
     private readonly AsyncMode _mode;
     private readonly string _prefix;
+    private readonly bool _passQueryDirectoryFileName;
     private readonly object _lock = new();
     private readonly Dictionary<string, MemNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private long _totalBytes;
@@ -37,11 +38,15 @@ internal sealed class TestMemFs : IFileSystem
     /// <summary>Number of times GetDirInfoByName was invoked (for dispatch-path assertions).</summary>
     public int GetDirInfoByNameCalls;
 
-    public TestMemFs(AsyncMode mode, string prefix, long totalBytes = 64 * 1024 * 1024)
+    public TestMemFs(AsyncMode mode, string prefix, long totalBytes = 64 * 1024 * 1024,
+        bool passQueryDirectoryFileName = false)
     {
         _mode = mode;
         _prefix = prefix;
         _totalBytes = totalBytes;
+        // Opt in to single-name query routing so WinFsp dispatches exact-name lookups
+        // through GetDirInfoByName instead of enumerating via ReadDirectory.
+        _passQueryDirectoryFileName = passQueryDirectoryFileName;
         // Root directory
         _nodes[@"\"] = new MemNode { IsDirectory = true, Name = @"\" };
     }
@@ -70,6 +75,7 @@ internal sealed class TestMemFs : IFileSystem
         host.UnicodeOnDisk = true;
         host.PersistentAcls = true;
         host.PostCleanupWhenModifiedOnly = true;
+        host.PassQueryDirectoryFileName = _passQueryDirectoryFileName;
         host.FileSystemName = "NTFS";
         host.Prefix = _prefix; // UNC mount — no drive letter needed
         return NtStatus.Success;
