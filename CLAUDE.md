@@ -31,7 +31,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow builds, tests, packs, pushes to nuget.org (via `NUGET_API_KEY` secret), and creates a GitHub Release.
+The workflow builds, tests, packs, obtains a short-lived NuGet API key via trusted publishing, pushes to nuget.org, and creates a GitHub Release.
 
 ## Architecture
 

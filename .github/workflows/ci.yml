@@ -32,6 +32,7 @@ jobs:
               - 'Directory.Build.props'
               - 'Directory.Packages.props'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
 
   build-and-test:
     needs: changes
