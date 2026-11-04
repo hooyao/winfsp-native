@@ -74,9 +74,18 @@ public sealed unsafe class WinFspFileSystem : IDisposable
     /// <param name="debugLog">0 = off, uint.MaxValue = all.</param>
     public int Mount(string? mountPoint, uint threadCount = 0,
         bool synchronized = false, uint debugLog = 0)
+        => MountCore(mountPoint, threadCount, synchronized, debugLog, false);
+
+    /// <summary>Start a network-prefix filesystem without assigning a drive letter.</summary>
+    public int MountAtPrefix(uint threadCount = 0, bool synchronized = false, uint debugLog = 0)
+        => MountCore(null, threadCount, synchronized, debugLog, true);
+
+    private int MountCore(string? mountPoint, uint threadCount, bool synchronized, uint debugLog, bool prefixOnly)
     {
         if (_fileSystemPtr != 0)
             return NtStatus.InvalidDeviceRequest; // already mounted
+
+        if (prefixOnly && VolumeParams.IsPrefixEmpty()) return NtStatus.InvalidParameter;
 
         string devicePath = VolumeParams.IsPrefixEmpty() ? FspApi.DiskDevicePath : FspApi.NetDevicePath;
         int result = FspApi.FspFileSystemCreate(devicePath, _volumeParamsPtr, _interfacePtr, out _fileSystemPtr);
@@ -90,11 +99,14 @@ public sealed unsafe class WinFspFileSystem : IDisposable
         FspApi.FspFileSystemSetOperationGuardStrategy(_fileSystemPtr, synchronized ? 1 : 0);
         FspApi.FspFileSystemSetDebugLog(_fileSystemPtr, debugLog);
 
-        result = FspApi.FspFileSystemSetMountPointEx(_fileSystemPtr, mountPoint, 0);
-        if (result < 0)
+        if (!prefixOnly)
         {
-            DestroyFs();
-            return result;
+            result = FspApi.FspFileSystemSetMountPointEx(_fileSystemPtr, mountPoint, 0);
+            if (result < 0)
+            {
+                DestroyFs();
+                return result;
+            }
         }
 
         result = FspApi.FspFileSystemStartDispatcher(_fileSystemPtr, threadCount);

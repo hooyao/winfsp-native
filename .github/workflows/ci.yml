@@ -77,6 +77,10 @@ jobs:
           }
           Write-Host "WinFsp installed at: $installDir (verified $dll)"
 
+      # The reparse integration test uses a UNC mount on this disposable runner.
+      - name: Enable remote symbolic link evaluation
+        run: fsutil behavior set SymlinkEvaluation R2R:1
+
       - name: Restore dependencies
         run: dotnet restore WinFsp.Native.slnx
 

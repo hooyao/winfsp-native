@@ -104,6 +104,19 @@ internal static partial class FspApi
     internal static unsafe bool FspFileSystemEndDirInfo(nint buffer, uint length, uint* pBytesTransferred)
         => FspFileSystemAddDirInfo(null, buffer, length, pBytesTransferred);
 
+    // The by-name callback is invoked synchronously, including with null Buffer/PSize
+    // when Find only needs to know whether a component is a reparse point.
+    [LibraryImport(DllName, EntryPoint = "FspFileSystemFindReparsePoint")]
+    internal static unsafe partial byte FspFileSystemFindReparsePoint(nint fileSystem,
+        delegate* unmanaged[Cdecl]<nint, nint, char*, byte, nint, nuint*, int> getByName,
+        nint context, char* fileName, uint* index);
+
+    [LibraryImport(DllName, EntryPoint = "FspFileSystemResolveReparsePoints")]
+    internal static unsafe partial int FspFileSystemResolveReparsePoints(nint fileSystem,
+        delegate* unmanaged[Cdecl]<nint, nint, char*, byte, nint, nuint*, int> getByName,
+        nint context, char* fileName, uint index, byte resolveLast,
+        nint ioStatus, nint buffer, nuint* size);
+
     // ── StreamInfo helpers ──
 
     [LibraryImport(DllName, EntryPoint = "FspFileSystemAddStreamInfo")]

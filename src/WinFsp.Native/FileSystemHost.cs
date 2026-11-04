@@ -53,6 +53,8 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
     public bool SupportsPosixUnlinkRename { get; set; }
     public bool PostDispositionWhenNecessaryOnly { get; set; }
     public string? Prefix { get; set; }
+    /// <summary>Use the UNC prefix without creating a drive-letter mount. Requires a nonempty Prefix and a null mount point.</summary>
+    public bool PrefixOnly { get; set; }
     public string FileSystemName { get; set; } = "NTFS";
 
     // ═══════════════════════════════════════════
@@ -70,20 +72,23 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
         try { result = _fs.Init(this); }
         catch (Exception ex) { return HandleException(ex); }
         if (result < 0) return result;
+        if (PrefixOnly && (mountPoint != null || string.IsNullOrEmpty(Prefix))) return NtStatus.InvalidParameter;
 
         _synchronousIo = _fs.SynchronousIo;
 
         // 2. Create low-level FS and configure VolumeParams
         _rawFs = new WinFspFileSystem();
         ConfigureVolumeParams(ref _rawFs.VolumeParams);
-        PopulateInterface(ref _rawFs.Interface);
+        PopulateInterface(ref _rawFs.Interface, ReparsePoints);
 
         // Store ourselves in UserContext so callbacks can find us
         _selfHandle = GCHandle.Alloc(this);
         _rawFs.UserContext = GCHandle.ToIntPtr(_selfHandle);
 
         // 3. Mount
-        result = _rawFs.Mount(mountPoint, threadCount, synchronized, debugLog);
+        result = PrefixOnly
+            ? _rawFs.MountAtPrefix(threadCount, synchronized, debugLog)
+            : _rawFs.Mount(mountPoint, threadCount, synchronized, debugLog);
         if (result < 0) { Cleanup(); return result; }
 
         // 4. Mounted callback
@@ -289,7 +294,7 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
     //  Populate function pointers
     // ═══════════════════════════════════════════
 
-    private static void PopulateInterface(ref FspFileSystemInterface iface)
+    private static void PopulateInterface(ref FspFileSystemInterface iface, bool reparsePoints)
     {
         iface.GetVolumeInfo = &OnGetVolumeInfo;
         iface.SetVolumeLabel = &OnSetVolumeLabel;
@@ -310,6 +315,8 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
         iface.GetSecurity = &OnGetSecurity;
         iface.SetSecurity = &OnSetSecurity;
         iface.ReadDirectory = &OnReadDirectory;
+        if (reparsePoints)
+            iface.ResolveReparsePoints = (nint)(delegate* unmanaged[Cdecl]<nint, char*, uint, byte, nint, nint, nuint*, int>)&OnResolveReparsePoints;
         iface.GetReparsePoint = &OnGetReparsePoint;
         iface.SetReparsePoint = &OnSetReparsePoint;
         iface.DeleteReparsePoint = &OnDeleteReparsePoint;
@@ -364,6 +371,9 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
             // implementation's task did not complete synchronously.
             var task = self._fs.GetFileSecurityByName(name, pSdSize != null, CancellationToken.None);
             var r = task.IsCompletedSuccessfully ? task.Result : task.AsTask().GetAwaiter().GetResult();
+            if (self.ReparsePoints && (r.Status == NtStatus.ObjectNameNotFound || r.Status == NtStatus.ObjectPathNotFound)
+                && FspApi.FspFileSystemFindReparsePoint(fs, &OnGetReparsePointByName, 0, fileName, pAttr) != 0)
+                return NtStatus.Reparse;
             if (r.Status >= 0 || r.Status == NtStatus.Reparse)
             {
                 if (pAttr != null) *pAttr = r.FileAttributes;
@@ -803,6 +813,36 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
     // ── Reparse ──
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    static int OnResolveReparsePoints(nint fs, char* fileName, uint index, byte resolveLast,
+        nint ioStatus, nint buffer, nuint* size)
+    {
+        var self = Self(fs);
+        try
+        {
+            return FspApi.FspFileSystemResolveReparsePoints(fs, &OnGetReparsePointByName, 0,
+                fileName, index, resolveLast, ioStatus, buffer, size);
+        }
+        catch (Exception ex) { return self.HandleException(ex); }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    static int OnGetReparsePointByName(nint fs, nint context, char* fileName, byte isDirectory,
+        nint buffer, nuint* size)
+    {
+        var self = Self(fs);
+        try
+        {
+            int status = self._fs.GetReparsePointByName(new string(fileName), isDirectory != 0, out var data);
+            if (status < 0) return status;
+            if (!ValidReparseData(data)) return NtStatus.InvalidReparseData;
+            if (buffer == 0) return status;
+            if (isDirectory != 0) data = TrimSymlinkTargetSeparators(data!);
+            return CopyReparseData(data, buffer, size);
+        }
+        catch (Exception ex) { return self.HandleException(ex); }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     static int OnGetReparsePoint(nint fs, FspFullContext* ctx, char* fn, nint buf, nuint* pSz)
     {
         var self = Self(fs);
@@ -811,7 +851,7 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
             var hs = H(ctx);
             byte[]? data = null;
             int r = self._fs.GetReparsePoint(new string(fn), ref data, hs.Info);
-            if (r >= 0) CopyReparseData(data, buf, pSz);
+            if (r >= 0) return CopyReparseData(data, buf, pSz);
             return r;
         }
         catch (Exception ex) { return self.HandleException(ex); }
@@ -935,14 +975,64 @@ public sealed unsafe partial class FileSystemHost(IFileSystem fileSystem) : IDis
     [LibraryImport("advapi32.dll")]
     private static partial uint GetSecurityDescriptorLength(nint pSecurityDescriptor);
 
-    private static void CopyReparseData(byte[]? data, nint buffer, nuint* pSize)
+    private static int CopyReparseData(byte[]? data, nint buffer, nuint* pSize)
     {
+        if (!ValidReparseData(data)) return NtStatus.InvalidReparseData;
         if (data != null && data.Length > 0)
         {
-            if ((int)*pSize < data.Length) { *pSize = (nuint)data.Length; return; }
+            if (*pSize < (nuint)data.Length) { *pSize = (nuint)data.Length; return NtStatus.BufferTooSmall; }
             *pSize = (nuint)data.Length;
             if (buffer != 0) Marshal.Copy(data, 0, buffer, data.Length);
         }
         else { *pSize = 0; }
+        return NtStatus.Success;
+    }
+
+    // WinFsp's native resolver joins the target to a remainder beginning with
+    // a backslash without removing duplicate separators. Only change the
+    // by-name resolution buffer; handle-based queries return the stored data.
+    private static byte[] TrimSymlinkTargetSeparators(byte[] data)
+    {
+        var bytes = data.AsSpan();
+        if (System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes) != 0xA000000C) return data;
+        int start = 20 + System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[8..]);
+        int end = start + System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[10..]);
+        int originalEnd = end;
+        while (end > start && bytes[end - 2] == (byte)'\\' && bytes[end - 1] == 0) end -= 2;
+        if (end == originalEnd) return data;
+
+        // Keep a root target absolute, and let the native resolver remove the
+        // dot before it joins the remaining components.
+        int length = end == start ? 4 : end - start;
+        byte[] result = new byte[20 + length];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(result, 0xA000000C);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(4), (ushort)(result.Length - 8));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(10), (ushort)length);
+        bytes.Slice(16, 4).CopyTo(result.AsSpan(16));
+        if (end == start) { result[20] = (byte)'\\'; result[22] = (byte)'.'; }
+        else bytes.Slice(start, length).CopyTo(result.AsSpan(20));
+        return result;
+    }
+
+    // WinFsp's resolver dereferences tag-specific offsets; validate managed callback
+    // results before exposing them to native code, even for existence-only probes.
+    private static bool ValidReparseData(byte[]? data)
+    {
+        if (data == null || data.Length < 8 || data.Length > 16384) return false;
+        var bytes = data.AsSpan();
+        uint tag = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+        // Third-party tags carry a GUID between the common header and payload;
+        // ReparseDataLength excludes that GUID.
+        int headerSize = (tag & 0x80000000u) != 0 ? 8 : 24;
+        if (data.Length < headerSize ||
+            System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[4..]) != data.Length - headerSize) return false;
+        int start = tag == 0xA0000003 ? 16 : tag == 0xA000000C ? 20 : 0;
+        if (start == 0) return true;
+        if (data.Length < start) return false;
+        int a = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[8..]);
+        int b = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[10..]);
+        int c = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[12..]);
+        int d = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[14..]);
+        return b != 0 && ((a | b | c | d) & 1) == 0 && a + b <= data.Length - start && c + d <= data.Length - start;
     }
 }

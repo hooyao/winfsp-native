@@ -273,7 +273,7 @@ public sealed class NameLookupMountFixture : IDisposable
         int result = _host.Mount(null);
         if (result < 0)
             throw new InvalidOperationException($"Mount failed: 0x{result:X8}");
-        Root = _host.MountPoint ?? throw new InvalidOperationException("MountPoint is null after mount");
+        Root = @"\" + prefix;
         if (!Root.EndsWith('\\'))
             Root += @"\";
     }

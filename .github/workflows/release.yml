@@ -46,6 +46,10 @@ jobs:
             exit 1
           }
 
+      # Match CI: the reparse integration tests follow links between UNC paths.
+      - name: Enable remote symbolic link evaluation
+        run: fsutil behavior set SymlinkEvaluation R2R:1
+
       - name: Restore
         run: dotnet restore WinFsp.Native.slnx
 

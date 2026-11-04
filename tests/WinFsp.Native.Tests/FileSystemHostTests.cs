@@ -45,7 +45,7 @@ public abstract class MountFixtureBase : IDisposable
         if (result < 0)
             throw new InvalidOperationException($"Mount failed for {mode}: 0x{result:X8}");
 
-        Root = _host.MountPoint ?? throw new InvalidOperationException("MountPoint is null after mount");
+        Root = @"\" + unique;
         // UNC path needs trailing backslash for Path.Combine to work
         if (!Root.EndsWith('\\'))
             Root += @"\";
