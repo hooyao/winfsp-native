@@ -247,6 +247,15 @@ public interface IFileSystem
     //  Reparse / Streams / EA / IOCTL
     // ═══════════════════════════════════════════
 
+    /// <summary>
+    /// Query reparse data without opening a handle. Required when <see cref="FileSystemHost.ReparsePoints"/>
+    /// is enabled. Return <see cref="NtStatus.NotAReparse"/> for ordinary nodes and a
+    /// not-found status for absent nodes. The returned bytes must remain immutable.
+    /// Called synchronously by the native path resolver.
+    /// </summary>
+    int GetReparsePointByName(string fileName, bool isDirectory, out byte[]? reparseData)
+    { reparseData = null; return NtStatus.NotAReparse; }
+
     int GetReparsePoint(string fileName, ref byte[]? reparseData, FileOperationInfo info)
         => NtStatus.InvalidDeviceRequest;
     int SetReparsePoint(string fileName, byte[] reparseData, FileOperationInfo info)

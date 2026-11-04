@@ -74,6 +74,22 @@ fs.Interface.Read = &OnRead;
 fs.Mount("Z:");
 ```
 
+## Reparse points
+
+Set `FileSystemHost.ReparsePoints` in `IFileSystem.Init` and implement
+`GetReparsePointByName` together with the handle-based get, set, and delete methods. The
+by-name method must return the raw reparse buffer for a link, `NtStatus.NotAReparse` for
+an ordinary node, and a not-found status for a missing node. The host calls WinFsp's native
+find and resolve helpers so Windows follows links and handles cross-volume targets. The
+by-name callback is synchronous and must return stable, immutable data. When name lookup
+returns a missing-path status, the host checks for an intermediate reparse point before
+returning the failure. File systems which do not enable reparse points retain their previous
+behavior.
+
+For a network filesystem that should be reachable only by its UNC prefix, set
+`host.PrefixOnly = true` and `host.Prefix` before calling `host.Mount(null)`. Without
+`PrefixOnly`, WinFsp interprets a null mount point as an automatic drive-letter mount.
+
 ## Prerequisites
 
 - Windows 10/11

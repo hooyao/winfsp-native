@@ -30,6 +30,7 @@ public static class NtStatus
     public const int NotADirectory = unchecked((int)0xC0000103);
     public const int FileIsADirectory = unchecked((int)0xC00000BA);
     public const int NotAReparse = unchecked((int)0xC0000275);
+    public const int InvalidReparseData = unchecked((int)0xC0000278);
     public const int InternalError = unchecked((int)0xC00000E5);
     public const int UnexpectedIoError = unchecked((int)0xC00000E9);
     public const int Reparse = unchecked((int)0x00000104);

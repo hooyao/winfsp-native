@@ -113,7 +113,7 @@ Must build a fresh stack-allocated `FspTransactRsp` with `Size`/`Kind`/`Hint` fi
 - **`fileSystemName` must be `"NTFS"`** for elevated process compatibility.
 - **`GetFileSecurityByName`** returning `securityDescriptor = null` (sdSize=0) makes WinFsp skip access checks.
 - **`SetMountPointEx` crashes on `"R:\"` (trailing backslash)**. Use `"R:"` for `DefineDosDevice` or `"\\.\R:"` for Mount Manager.
-- **Test mounts must use UNC paths** (`host.Prefix = @"\winfsp-tests\name"`; `host.Mount(null)`), not drive letters. Drive letter mounts become zombie on process crash and hang Explorer/entire system.
+- **Test mounts must use UNC paths** (`host.Prefix = @"\winfsp-tests\name"`; `host.PrefixOnly = true`; `host.Mount(null)`), not drive letters. Without `PrefixOnly`, WinFsp treats a null mount point as an auto-assigned drive letter, which can become a zombie on process crash.
 - **`FspFileSystemCreate` stores the Interface pointer, not a copy**. The 512-byte interface struct must remain valid for the FS lifetime.
 - **Debug logging**: call `WinFspFileSystem.SetDebugLogToStderr()` before `Mount()`, then `mount(debugLog: uint.MaxValue)`.
 

@@ -28,6 +28,7 @@ internal sealed class TestMemFs : IFileSystem
     private readonly AsyncMode _mode;
     private readonly string _prefix;
     private readonly bool _passQueryDirectoryFileName;
+    private readonly bool _reparsePoints;
     private readonly object _lock = new();
     private readonly Dictionary<string, MemNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private long _totalBytes;
@@ -39,7 +40,7 @@ internal sealed class TestMemFs : IFileSystem
     public int GetDirInfoByNameCalls;
 
     public TestMemFs(AsyncMode mode, string prefix, long totalBytes = 64 * 1024 * 1024,
-        bool passQueryDirectoryFileName = false)
+        bool passQueryDirectoryFileName = false, bool reparsePoints = false)
     {
         _mode = mode;
         _prefix = prefix;
@@ -47,6 +48,7 @@ internal sealed class TestMemFs : IFileSystem
         // Opt in to single-name query routing so WinFsp dispatches exact-name lookups
         // through GetDirInfoByName instead of enumerating via ReadDirectory.
         _passQueryDirectoryFileName = passQueryDirectoryFileName;
+        _reparsePoints = reparsePoints;
         // Root directory
         _nodes[@"\"] = new MemNode { IsDirectory = true, Name = @"\" };
     }
@@ -58,6 +60,7 @@ internal sealed class TestMemFs : IFileSystem
         public string Name = "";
         public bool IsDirectory;
         public byte[] Data = [];
+        public byte[]? ReparseData;
         public uint Attributes;
         public ulong CreationTime;
         public ulong LastAccessTime;
@@ -76,8 +79,10 @@ internal sealed class TestMemFs : IFileSystem
         host.PersistentAcls = true;
         host.PostCleanupWhenModifiedOnly = true;
         host.PassQueryDirectoryFileName = _passQueryDirectoryFileName;
+        host.ReparsePoints = _reparsePoints;
         host.FileSystemName = "NTFS";
         host.Prefix = _prefix; // UNC mount — no drive letter needed
+        host.PrefixOnly = true;
         return NtStatus.Success;
     }
 
@@ -98,11 +103,48 @@ internal sealed class TestMemFs : IFileSystem
         {
             if (_nodes.TryGetValue(fileName, out var node))
             {
-                uint attr = node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u);
+                uint attr = (node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u)) |
+                    (node.ReparseData == null ? 0u : 0x400u);
                 return new ValueTask<SecurityByNameResult>(SecurityByNameResult.Success(attr));
             }
         }
         return new ValueTask<SecurityByNameResult>(SecurityByNameResult.Error(NtStatus.ObjectNameNotFound));
+    }
+
+    public int GetReparsePointByName(string fileName, bool isDirectory, out byte[]? reparseData)
+    {
+        lock (_lock)
+        {
+            var node = GetNode(fileName);
+            reparseData = node?.ReparseData;
+            return node == null ? NtStatus.ObjectNameNotFound : reparseData == null ? NtStatus.NotAReparse : NtStatus.Success;
+        }
+    }
+
+    public int GetReparsePoint(string fileName, ref byte[]? reparseData, FileOperationInfo info)
+    {
+        lock (_lock)
+        {
+            var node = GetNode(info);
+            reparseData = node?.ReparseData;
+            return node == null ? NtStatus.ObjectNameNotFound : reparseData == null ? NtStatus.NotAReparse : NtStatus.Success;
+        }
+    }
+
+    public int SetReparsePoint(string fileName, byte[] reparseData, FileOperationInfo info)
+    {
+        lock (_lock)
+        {
+            var node = GetNode(info);
+            if (node == null) return NtStatus.ObjectNameNotFound;
+            node.ReparseData = reparseData;
+            return NtStatus.Success;
+        }
+    }
+
+    public void CorruptReparseForTest(string fileName, byte[] data)
+    {
+        lock (_lock) _nodes[fileName].ReparseData = data;
     }
 
     /// <summary>
@@ -465,7 +507,9 @@ internal sealed class TestMemFs : IFileSystem
 
     private static FspFileInfo MakeFileInfo(MemNode node) => new()
     {
-        FileAttributes = node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u),
+        FileAttributes = (node.IsDirectory ? 0x10u : (node.Attributes != 0 ? node.Attributes : 0x80u)) |
+            (node.ReparseData == null ? 0u : 0x400u),
+        ReparseTag = node.ReparseData == null ? 0 : BitConverter.ToUInt32(node.ReparseData),
         FileSize = (ulong)node.Data.Length,
         AllocationSize = (ulong)node.Data.Length,
         CreationTime = node.CreationTime,
